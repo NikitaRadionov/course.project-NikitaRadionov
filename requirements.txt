@@ -1,2 +1,6 @@
 fastapi==0.112.2
 uvicorn==0.30.5
+sqlmodel==0.0.25
+pwdlib[argon2]==0.2.1
+PyJWT==2.10.1
+python-multipart==0.0.20
