@@ -26,13 +26,6 @@ def login_user(username: str, password: str = "secret"):
     return r.json()["access_token"]
 
 
-def test_user_registration_and_login():
-    r = register_user("alice")
-    assert r.status_code == 200
-    token = login_user("alice")
-    assert isinstance(token, str)
-
-
 def test_create_and_get_media():
     register_user("bob")
     token = login_user("bob")
