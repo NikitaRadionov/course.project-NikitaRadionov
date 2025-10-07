@@ -13,7 +13,7 @@ uvicorn app.main:app --reload
 
 ## Ритуал перед PR
 ```bash
-ruff --fix .
+ruff check --fix .
 black .
 isort .
 pytest -q
@@ -38,16 +38,12 @@ docker compose up --build
 ```
 
 ## Эндпойнты
-- `GET /health` → `{"status": "ok"}`
-- `POST /items?name=...` — демо-сущность
-- `GET /items/{id}`
-
-## Формат ошибок
-Все ошибки — JSON-обёртка:
-```json
-{
-  "error": {"code": "not_found", "message": "item not found"}
-}
-```
+- `POST /users/` - Create User
+- `POST /token` - Login
+- `POST /media/` - Create Media
+- `GET /media/` - List Media
+- `GET /media/{media_id}` - Get Media
+- `PUT /media/{media_id}` - Update Media
+- `DELETE /media/{media_id}` - Delete Media
 
 См. также: `SECURITY.md`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`.
