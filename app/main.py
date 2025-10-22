@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import List, Optional
@@ -103,19 +104,47 @@ class ApiError(Exception):
 
 @app.exception_handler(ApiError)
 async def api_error_handler(request: Request, exc: ApiError):
+    correlation_id = str(uuid.uuid4())
     return JSONResponse(
         status_code=exc.status,
-        content={"error": {"code": exc.code, "message": exc.message}},
+        content={
+            "type": "about:blank",
+            "title": exc.code,
+            "status": exc.status,
+            "detail": exc.message,
+            "correlation_id": correlation_id,
+        },
     )
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    # Normalize FastAPI HTTPException into our error envelope
+    correlation_id = str(uuid.uuid4())
     detail = exc.detail if isinstance(exc.detail, str) else "http_error"
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": "http_error", "message": detail}},
+        content={
+            "type": "about:blank",
+            "title": "http_error",
+            "status": exc.status_code,
+            "detail": detail,
+            "correlation_id": correlation_id,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def internal_error_handler(request: Request, exc: Exception):
+    correlation_id = str(uuid.uuid4())
+    return JSONResponse(
+        status_code=500,
+        content={
+            "type": "about:blank",
+            "title": "internal_error",
+            "status": 500,
+            "detail": "internal_error",
+            "correlation_id": correlation_id,
+        },
     )
 
 
