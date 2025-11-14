@@ -51,3 +51,37 @@ jobs:
 
       - name: Pre-commit (all files)
         run: pre-commit run --all-files
+
+      - name: Build Docker image
+        run: docker build -t myapp:test .
+
+      - name: Scan Docker image with Hadolint
+        run: docker run --rm -i hadolint/hadolint < Dockerfile
+
+      - name: Scan Docker image with Trivy
+        run: trivy image --exit-code 1 --severity CRITICAL myapp:test
+
+      - name: Check non-root user
+        run: |
+          USER_ID=$(docker run --rm myapp:test id -u)
+          echo "Container runs as UID=$USER_ID"
+          if [ "$USER_ID" -eq 0 ]; then
+            echo "❌ Container runs as root!"
+            exit 1
+          fi
+
+      - name: Test container healthcheck
+        run: |
+          CONTAINER_ID=$(docker run -d myapp:test)
+          echo "Waiting for healthcheck..."
+          sleep 15
+          STATUS=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID)
+          echo "Healthcheck status: $STATUS"
+          docker rm -f $CONTAINER_ID
+          if [ "$STATUS" != "healthy" ]; then
+            echo "❌ Healthcheck failed!"
+            exit 1
+          fi
+
+      - name: Docker image history (layers & size)
+        run: docker history myapp:test --no-trunc

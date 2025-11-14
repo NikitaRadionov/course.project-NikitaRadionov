@@ -2,7 +2,7 @@ import os
 
 from sqlmodel import Session, SQLModel, create_engine
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./media.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./db/media.db")
 
 
 engine = create_engine(

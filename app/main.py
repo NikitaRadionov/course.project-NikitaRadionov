@@ -188,3 +188,8 @@ def delete_media(
     session.delete(media)
     session.commit()
     return {"ok": True}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
