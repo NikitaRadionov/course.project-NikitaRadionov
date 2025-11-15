@@ -64,6 +64,13 @@ jobs:
             hadolint/hadolint \
             hadolint --ignore DL3008 /Dockerfile
 
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.54.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.54.1_Linux-64bit.deb
+
       - name: Scan Docker image with Trivy
         run: trivy image --exit-code 1 --severity CRITICAL myapp:test
 
