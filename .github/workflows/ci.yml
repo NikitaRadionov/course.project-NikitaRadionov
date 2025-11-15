@@ -80,13 +80,18 @@ jobs:
         run: |
           CONTAINER_ID=$(docker run -d myapp:test)
           echo "Waiting for healthcheck..."
-          sleep 15
-          STATUS=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID)
-          echo "Healthcheck status: $STATUS"
+          for i in {1..10}; do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID)
+              echo "Attempt $i: $STATUS"
+              if [ "$STATUS" == "healthy" ]; then
+                  break
+              fi
+              sleep 5
+          done
           docker rm -f $CONTAINER_ID
           if [ "$STATUS" != "healthy" ]; then
-            echo "❌ Healthcheck failed!"
-            exit 1
+              echo "❌ Healthcheck failed!"
+              exit 1
           fi
 
       - name: Docker image history (layers & size)
