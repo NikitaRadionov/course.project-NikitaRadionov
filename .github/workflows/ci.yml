@@ -57,8 +57,12 @@ jobs:
       - name: Build Docker image
         run: docker build -t myapp:test .
 
-      - name: Scan Docker image with Hadolint
-        run: docker run --rm -i hadolint/hadolint hadolint --ignore DL3008 < Dockerfile
+      - name: Scan Dockerfile with Hadolint
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/Dockerfile:/Dockerfile \
+            hadolint/hadolint \
+            hadolint --ignore DL3008 /Dockerfile
 
       - name: Scan Docker image with Trivy
         run: trivy image --exit-code 1 --severity CRITICAL myapp:test
