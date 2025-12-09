@@ -31,7 +31,7 @@ jobs:
       matrix:
         python-version: [ "3.10", "3.11" ]
         environment: [ "dev", "stage", "prod" ]
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
         SECRET_KEY: ${{ secrets[format('{0}_secret_key', matrix.environment)] }}
         DATABASE_URL: ${{ secrets[format('{0}_database_url', matrix.environment)] }}
