@@ -1,0 +1,38 @@
+rules:
+  - id: no-hardcoded-assert
+    patterns:
+      - pattern: assert $X
+    message: Avoid using assert in production code
+    severity: WARNING
+    languages: [python]
+
+  - id: no-eval-exec
+    patterns:
+      - pattern-either:
+        - pattern: eval(...)
+        - pattern: exec(...)
+    message: Avoid eval() or exec() for security
+    severity: ERROR
+    languages: [python]
+
+  - id: potential-sql-injection
+    patterns:
+      - pattern: 'f"SELECT ... { $VAR }"'
+      - pattern: '"SELECT ..." + $VAR'
+    message: Potential SQL injection
+    severity: WARNING
+    languages: [python]
+
+  - id: hardcoded-secret
+    patterns:
+      - pattern-regex: '(password|secret|key|token)\s*=\s*"[^"]+"'
+    message: Hardcoded secret detected
+    severity: ERROR
+    languages: [python]
+
+  - id: insecure-cors-header
+    patterns:
+      - pattern-regex: '.*Access-Control-Allow-Origin.*\*.*'
+    message: Insecure CORS header
+    severity: WARNING
+    languages: [python]
