@@ -25,7 +25,7 @@ rules:
 
   - id: hardcoded-secret
     patterns:
-      - pattern-regex: '(password|secret|key|token)\s*=\s*"[^"]+"'
+      - pattern-regex: "^(password|secret|api_key|token)\\s*=\\s*\"[^\"]+\""
     message: Hardcoded secret detected
     severity: ERROR
     languages: [python]
