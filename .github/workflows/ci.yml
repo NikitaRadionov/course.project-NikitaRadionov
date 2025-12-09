@@ -83,7 +83,7 @@ jobs:
       - name: Upload linter reports
         uses: actions/upload-artifact@v4
         with:
-          name: lint-reports
+          name: lint-reports-${{ matrix.environment }}-py${{ matrix.python-version }}
           path: reports/linters/
 
       - name: Tests with coverage
@@ -95,7 +95,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-${{ matrix.environment }}-py${{ matrix.python-version }}
           path: reports/
 
       - name: Pre-commit (all files)
