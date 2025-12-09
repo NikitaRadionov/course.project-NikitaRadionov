@@ -25,7 +25,7 @@ jobs:
           echo "2. Reset main to previous state: git checkout main && git reset --hard HEAD~1"
           echo "3. Push your fix branch and create a PR"
           exit 1
-  build:
+  ci-build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -123,6 +123,42 @@ jobs:
       - name: Docker image history (layers & size)
         run: docker history myapp:test --no-trunc
 
+  cd-deploy-simulation:
+    runs-on: ubuntu-latest
+    needs: ci-build
+    if: github.ref == 'refs/heads/main' && needs.ci-build.result == 'success'
+
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    strategy:
+      matrix:
+        environment: [ "stage", "prod" ]
+
+    environment:
+      name: ${{ matrix.environment }}
+      url: https://${{ matrix.environment }}-api.example.com
+
+    steps:
+      - name: Download coverage reports from CI
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-reports-${{ matrix.environment }}-*
+          path: ./reports
+          merge-multiple: true
+
+      - name: Simulate deployment to ${{ matrix.environment }}
+        run: |
+          echo "Starting CD pipeline for ${{ matrix.environment }}"
+          echo "Artifact: app-${{ github.sha }}.whl"
+          echo "Secrets from: ${{ matrix.environment }} GitHub Environment"
+          echo "Target: https://api-${{ matrix.environment }}.example.com"
+          echo ""
+          sleep 3
+          echo "${{ matrix.environment }} deployment simulation completed"
+
       - name: Deploy coverage report to GitHub Pages (mock CD)
         if: matrix.environment == 'stage'
         uses: peaceiris/actions-gh-pages@v3
@@ -130,3 +166,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./reports/coverage-html
           destination_dir: coverage-report
+          keep_files: false
