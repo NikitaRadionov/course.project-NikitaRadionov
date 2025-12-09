@@ -33,8 +33,8 @@ jobs:
         environment: [ "dev", "stage", "prod" ]
     timeout-minutes: 10
     env:
-      SECRET_KEY: ${{ secrets[format('{0}_SECRET_KEY', upper(matrix.environment))] }}
-      DATABASE_URL: ${{ secrets[format('{0}_DATABASE_URL', upper(matrix.environment))] }}
+        SECRET_KEY: ${{ secrets[format('{0}_secret_key', matrix.environment)] }}
+        DATABASE_URL: ${{ secrets[format('{0}_database_url', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
