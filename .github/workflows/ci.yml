@@ -56,14 +56,16 @@ jobs:
           docker pull myapp:test || true
 
       - name: Build Docker image
-        uses: docker/build-push-action@v4
+        run: docker build -t myapp:test .
+
+      - name: Save Docker image as artifact
+        run: docker save myapp:test -o myapp_test.tar
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          file: ./Dockerfile
-          push: false
-          tags: myapp:test
-          cache-from: type=registry,ref=myapp:test
-          cache-to: type=registry,ref=myapp:test,mode=max
+          name: docker-image-${{ matrix.environment }}
+          path: myapp_test.tar
 
       - name: Install dependencies
         run: |
@@ -97,18 +99,6 @@ jobs:
 
       - name: Pre-commit (all files)
         run: pre-commit run --all-files
-
-      - name: Build Docker image
-        run: docker build -t myapp:test .
-
-      - name: Save Docker image as artifact
-        run: docker save myapp:test -o myapp_test.tar
-
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: myapp_test.tar
 
       - name: Scan Dockerfile with Hadolint
         run: |
