@@ -28,7 +28,9 @@ jobs:
   dast-zap:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
+    env:
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
