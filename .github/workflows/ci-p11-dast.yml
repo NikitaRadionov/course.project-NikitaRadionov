@@ -29,8 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SECRET_KEY: ${{ secrets.SECRET_KEY }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY || 'dummy-secret-for-dast-test-12345' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'sqlite:///:memory:' }}  # In-memory БД
+      ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,68 +48,103 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
-          # Установим fastapi и uvicorn если их нет в requirements
-          pip install fastapi uvicorn[standard] sqlmodel
+          pip install fastapi uvicorn[standard] sqlmodel pwdlib python-jose python-multipart
 
       - name: Create evidence directory
         run: mkdir -p EVIDENCE/P11
 
       - name: Start application in background
         run: |
-          # Запускаем ваше FastAPI приложение на порту 8080
+          # Экспортируем переменные для текущего shell
+          export SECRET_KEY="${{ secrets.SECRET_KEY || 'dummy-secret-for-dast-test-12345' }}"
+          export DATABASE_URL="${{ secrets.DATABASE_URL || 'sqlite:///:memory:' }}"
+          export ALGORITHM="HS256"
+
           echo "Starting FastAPI application..."
-          uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 &
+          echo "SECRET_KEY length: ${#SECRET_KEY}"
+          echo "DATABASE_URL: $DATABASE_URL"
+
+          # Запускаем в фоне и перенаправляем вывод в файл для отладки
+          uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 > /tmp/app.log 2>&1 &
           APP_PID=$!
           echo $APP_PID > /tmp/app.pid
 
-          # Ждём пока приложение запустится
+          echo "App PID: $APP_PID"
           echo "Waiting for app to start..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health > /dev/null; then
-              echo "Application is running!"
+
+          # Ждём пока приложение запустится
+          for i in {1..40}; do
+            if curl -s -f http://localhost:8080/health > /dev/null 2>&1; then
+              echo "Application is running and reachable!"
+              curl -s http://localhost:8080/ | head -c 100
+              echo ""
               break
             fi
-            echo "Attempt $i/30: Application not ready yet..."
-            sleep 2
-            if [ $i -eq 30 ]; then
+            echo "Attempt $i/40: Application not ready yet..."
+            sleep 3
+            if [ $i -eq 40 ]; then
               echo "Application failed to start"
+              echo "=== App logs ==="
+              tail -50 /tmp/app.log || true
+              echo "=== Health check ==="
+              curl -v http://localhost:8080/health || true
               kill $APP_PID 2>/dev/null || true
               exit 1
             fi
           done
 
+      - name: Verify application reachable for ZAP
+        run: |
+          echo "Verifying application is reachable from container network..."
+          # Проверяем из контейнера (как будет делать ZAP)
+          docker run --rm --network="host" curlimages/curl:latest \
+            curl -s -o /dev/null -w "Container health check: %{http_code}\n" \
+            http://localhost:8080/health || echo "Container check failed"
+
       - name: Run ZAP baseline scan
         run: |
           echo "Running OWASP ZAP baseline scan..."
+
+          # Важно: используем --network="host" и localhost вместо host.docker.internal
           docker run --rm \
             -v $(pwd)/EVIDENCE/P11:/zap/wrk/:rw \
             -u zap \
-            -t \
+            --network="host" \
             owasp/zap2docker-stable:latest \
             zap-baseline.py \
-            -t http://host.docker.internal:8080/ \
+            -t http://localhost:8080/ \
             -r zap_baseline.html \
             -J zap_baseline.json \
-            -x zap_baseline.xml \
             --hook=/zap/auth_hook.py \
             -a \
             -I \
             -j \
             || echo "ZAP completed (findings don't fail workflow)"
 
+          # Проверяем создались ли файлы
+          echo "=== Generated files ==="
+          ls -la EVIDENCE/P11/ || echo "No EVIDENCE/P11 directory"
+          [ -f "EVIDENCE/P11/zap_baseline.json" ] && echo "JSON report created" || echo "No JSON report"
+          [ -f "EVIDENCE/P11/zap_baseline.html" ] && echo "HTML report created" || echo "No HTML report"
+
       - name: Stop application
         if: always()
         run: |
+          echo "Cleaning up..."
           if [ -f /tmp/app.pid ]; then
             APP_PID=$(cat /tmp/app.pid)
             echo "Stopping application (PID: $APP_PID)..."
             kill $APP_PID 2>/dev/null || true
+            sleep 2
           fi
+          # Убиваем все uvicorn процессы на всякий случай
+          pkill -f "uvicorn" 2>/dev/null || true
 
       - name: Generate scan summary
         run: |
           SUMMARY_FILE="EVIDENCE/P11/zap_summary.md"
           JSON_REPORT="EVIDENCE/P11/zap_baseline.json"
+          HTML_REPORT="EVIDENCE/P11/zap_baseline.html"
 
           echo "# ZAP Baseline Scan Summary" > $SUMMARY_FILE
           echo "" >> $SUMMARY_FILE
@@ -115,12 +153,15 @@ jobs:
           echo "**Commit:** ${{ github.sha }}" >> $SUMMARY_FILE
           echo "" >> $SUMMARY_FILE
 
-          if [ -f "$JSON_REPORT" ]; then
-            # Парсим JSON отчёт для сводки
-            HIGH=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' $JSON_REPORT 2>/dev/null || echo "0")
-            MEDIUM=$(jq '[.site[]?.alerts[]? | select(.riskcode == "2")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
-            LOW=$(jq '[.site[]?.alerts[]? | select(.riskcode == "1")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
-            INFO=$(jq '[.site[]?.alerts[]? | select(.riskcode == "0")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
+          if [ -f "$JSON_REPORT" ] && [ -s "$JSON_REPORT" ]; then
+            echo " ZAP scan completed successfully" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+
+            # Парсим JSON отчёт
+            HIGH=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' "$JSON_REPORT" 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[]?.alerts[]? | select(.riskcode == "2")] | length' "$JSON_REPORT" 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[]?.alerts[]? | select(.riskcode == "1")] | length' "$JSON_REPORT" 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[]?.alerts[]? | select(.riskcode == "0")] | length' "$JSON_REPORT" 2>/dev/null || echo "0")
 
             echo "## Scan Results Summary" >> $SUMMARY_FILE
             echo "" >> $SUMMARY_FILE
@@ -132,20 +173,44 @@ jobs:
             echo "| Informational | $INFO |" >> $SUMMARY_FILE
             echo "" >> $SUMMARY_FILE
 
-            echo "## Next Steps" >> $SUMMARY_FILE
+            TOTAL=$((HIGH + MEDIUM + LOW + INFO))
+            echo "**Total findings:** $TOTAL" >> $SUMMARY_FILE
             echo "" >> $SUMMARY_FILE
-            echo "1. Review detailed reports:" >> $SUMMARY_FILE
-            echo "   - HTML: [zap_baseline.html](zap_baseline.html)" >> $SUMMARY_FILE
-            echo "   - JSON: [zap_baseline.json](zap_baseline.json)" >> $SUMMARY_FILE
-            echo "2. Prioritize High/Medium findings for remediation" >> $SUMMARY_FILE
-            echo "3. Document false positives if applicable" >> $SUMMARY_FILE
-            echo "4. Consider adding authentication tests if needed" >> $SUMMARY_FILE
+
+            # Показываем первые 3 findings
+            if [ "$TOTAL" -gt 0 ]; then
+              echo "### Sample Findings" >> $SUMMARY_FILE
+              jq -r '
+                .site[0].alerts[0:3] |
+                .[] |
+                "- **\(.name)** (\(.riskcode)): \(.desc | sub("^(.{80}).*"; "\1..."))"
+              ' "$JSON_REPORT" >> $SUMMARY_FILE 2>/dev/null || echo "Could not parse findings details" >> $SUMMARY_FILE
+            fi
           else
-            echo "## No ZAP report generated" >> $SUMMARY_FILE
-            echo "Check if application started correctly and ZAP could reach it." >> $SUMMARY_FILE
+            echo "## ZAP scan failed or no report generated" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "Possible reasons:" >> $SUMMARY_FILE
+            echo "1. Application failed to start" >> $SUMMARY_FILE
+            echo "2. ZAP could not connect to http://localhost:8080/" >> $SUMMARY_FILE
+            echo "3. Network configuration issues" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "Check workflow logs for detailed error messages." >> $SUMMARY_FILE
           fi
 
+          echo "" >> $SUMMARY_FILE
+          echo "## Next Steps" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "1. Review detailed reports:" >> $SUMMARY_FILE
+          echo "   - HTML: [zap_baseline.html](zap_baseline.html)" >> $SUMMARY_FILE
+          echo "   - JSON: [zap_baseline.json](zap_baseline.json)" >> $SUMMARY_FILE
+          echo "2. Prioritize High/Medium findings for remediation" >> $SUMMARY_FILE
+          echo "3. Document false positives if applicable" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "---" >> $SUMMARY_FILE
+          echo "*Generated automatically by GitHub Actions*" >> $SUMMARY_FILE
+
       - name: Upload DAST evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: p11-dast-evidence
