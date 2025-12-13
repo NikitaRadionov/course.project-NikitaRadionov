@@ -106,7 +106,7 @@ jobs:
       - name: Generate scan summary
         run: |
           SUMMARY_FILE="EVIDENCE/P11/zap_summary.md"
-          JSON_REPORT="EVIDENCE/P10/zap_baseline.json"
+          JSON_REPORT="EVIDENCE/P11/zap_baseline.json"
 
           echo "# ZAP Baseline Scan Summary" > $SUMMARY_FILE
           echo "" >> $SUMMARY_FILE
