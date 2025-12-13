@@ -1,0 +1,151 @@
+name: Security - DAST (ZAP baseline)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'requirements*.txt'
+      - '.github/workflows/ci-p11-dast.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'src/**'
+      - 'requirements*.txt'
+      - '.github/workflows/ci-p11-dast.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p11-dast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dast-zap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          # Установим fastapi и uvicorn если их нет в requirements
+          pip install fastapi uvicorn[standard] sqlmodel
+
+      - name: Create evidence directory
+        run: mkdir -p EVIDENCE/P11
+
+      - name: Start application in background
+        run: |
+          # Запускаем ваше FastAPI приложение на порту 8080
+          echo "Starting FastAPI application..."
+          uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 1 &
+          APP_PID=$!
+          echo $APP_PID > /tmp/app.pid
+
+          # Ждём пока приложение запустится
+          echo "Waiting for app to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "Application is running!"
+              break
+            fi
+            echo "Attempt $i/30: Application not ready yet..."
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "Application failed to start"
+              kill $APP_PID 2>/dev/null || true
+              exit 1
+            fi
+          done
+
+      - name: Run ZAP baseline scan
+        run: |
+          echo "Running OWASP ZAP baseline scan..."
+          docker run --rm \
+            -v $(pwd)/EVIDENCE/P11:/zap/wrk/:rw \
+            -u zap \
+            -t \
+            owasp/zap2docker-stable:latest \
+            zap-baseline.py \
+            -t http://host.docker.internal:8080/ \
+            -r zap_baseline.html \
+            -J zap_baseline.json \
+            -x zap_baseline.xml \
+            --hook=/zap/auth_hook.py \
+            -a \
+            -I \
+            -j \
+            || echo "ZAP completed (findings don't fail workflow)"
+
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f /tmp/app.pid ]; then
+            APP_PID=$(cat /tmp/app.pid)
+            echo "Stopping application (PID: $APP_PID)..."
+            kill $APP_PID 2>/dev/null || true
+          fi
+
+      - name: Generate scan summary
+        run: |
+          SUMMARY_FILE="EVIDENCE/P11/zap_summary.md"
+          JSON_REPORT="EVIDENCE/P10/zap_baseline.json"
+
+          echo "# ZAP Baseline Scan Summary" > $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+          echo "**Target URL:** http://localhost:8080/" >> $SUMMARY_FILE
+          echo "**Scan Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $SUMMARY_FILE
+          echo "**Commit:** ${{ github.sha }}" >> $SUMMARY_FILE
+          echo "" >> $SUMMARY_FILE
+
+          if [ -f "$JSON_REPORT" ]; then
+            # Парсим JSON отчёт для сводки
+            HIGH=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' $JSON_REPORT 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.site[]?.alerts[]? | select(.riskcode == "2")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
+            LOW=$(jq '[.site[]?.alerts[]? | select(.riskcode == "1")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
+            INFO=$(jq '[.site[]?.alerts[]? | select(.riskcode == "0")] | select(. != null) | length' $JSON_REPORT 2>/dev/null || echo "0")
+
+            echo "## Scan Results Summary" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "| Severity | Count |" >> $SUMMARY_FILE
+            echo "|----------|-------|" >> $SUMMARY_FILE
+            echo "| High | $HIGH |" >> $SUMMARY_FILE
+            echo "| Medium | $MEDIUM |" >> $SUMMARY_FILE
+            echo "| Low | $LOW |" >> $SUMMARY_FILE
+            echo "| Informational | $INFO |" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+
+            echo "## Next Steps" >> $SUMMARY_FILE
+            echo "" >> $SUMMARY_FILE
+            echo "1. Review detailed reports:" >> $SUMMARY_FILE
+            echo "   - HTML: [zap_baseline.html](zap_baseline.html)" >> $SUMMARY_FILE
+            echo "   - JSON: [zap_baseline.json](zap_baseline.json)" >> $SUMMARY_FILE
+            echo "2. Prioritize High/Medium findings for remediation" >> $SUMMARY_FILE
+            echo "3. Document false positives if applicable" >> $SUMMARY_FILE
+            echo "4. Consider adding authentication tests if needed" >> $SUMMARY_FILE
+          else
+            echo "## No ZAP report generated" >> $SUMMARY_FILE
+            echo "Check if application started correctly and ZAP could reach it." >> $SUMMARY_FILE
+          fi
+
+      - name: Upload DAST evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: p11-dast-evidence
+          path: EVIDENCE/P11/
+          retention-days: 30

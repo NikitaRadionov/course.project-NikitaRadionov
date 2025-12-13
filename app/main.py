@@ -201,5 +201,5 @@ def read_root():
         "service": "Media Catalog API",
         "version": "0.1.0",
         "docs": "/docs",
-        "health": "/health"
+        "health": "/health",
     }
