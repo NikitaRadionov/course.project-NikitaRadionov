@@ -56,13 +56,21 @@ jobs:
 
       - name: ZAP Baseline
         run: |
-          docker run --rm --network host -v $PWD:/zap/wrk owasp/zap2docker-stable \
+          chmod 777 $(pwd)
+          mkdir -p EVIDENCE/P11
+          chmod 777 EVIDENCE/P11
+
+          docker run --rm --network host -v $(pwd):/zap/wrk owasp/zap2docker-stable \
             zap-baseline.py \
               -t http://localhost:8000 \
               -r zap_baseline.html \
               -J zap_baseline.json \
               -d || true
-          mv zap_baseline.* EVIDENCE/P11/ || true
+
+          ls -la zap_baseline.*
+
+          mv zap_baseline.html EVIDENCE/P11/
+          mv zap_baseline.json EVIDENCE/P11/
 
       - name: Upload P11 evidence
         if: always()
