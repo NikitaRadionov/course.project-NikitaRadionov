@@ -60,7 +60,7 @@ jobs:
           mkdir -p EVIDENCE/P11
           chmod 777 EVIDENCE/P11
 
-          docker run --rm --network host -v $(pwd):/zap/wrk owasp/zap2docker-stable \
+          docker run --rm --network host -v $(pwd):/zap/wrk ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
               -t http://localhost:8000 \
               -r zap_baseline.html \
