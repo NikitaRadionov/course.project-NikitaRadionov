@@ -193,3 +193,13 @@ def delete_media(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/")
+def read_root():
+    return {
+        "service": "Media Catalog API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
