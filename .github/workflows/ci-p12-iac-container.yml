@@ -34,6 +34,12 @@ jobs:
       - name: Ensure evidence directory
         run: mkdir -p EVIDENCE/P12
 
+      - name: Debug files
+        run: |
+          ls -l
+          ls -l security
+          cat Dockerfile
+
       - name: Run Hadolint on Dockerfile with config
         run: |
           echo "Running Hadolint with security/hadolint.yaml..."
