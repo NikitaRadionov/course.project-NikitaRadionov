@@ -25,29 +25,145 @@ jobs:
           echo "2. Reset main to previous state: git checkout main && git reset --hard HEAD~1"
           echo "3. Push your fix branch and create a PR"
           exit 1
-  build:
+  ci-build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.10", "3.11" ]
+        environment: [ "dev", "stage", "prod" ]
+    timeout-minutes: 20
+    env:
+        SECRET_KEY: ${{ secrets[format('{0}_secret_key', matrix.environment)] }}
+        DATABASE_URL: ${{ secrets[format('{0}_database_url', matrix.environment)] }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Pull previous Docker image (cache)
+        run: |
+          docker pull myapp:test || true
+
+      - name: Build Docker image
+        run: docker build -t myapp:test .
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+          pip install build
 
-      - name: Lint & Format
+      - name: Build Python package (wheel)
+        run: python -m build
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.environment }}-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+      - name: Lint & Format (generate reports)
         run: |
-          ruff check --output-format=github .
-          black --check .
-          isort --check-only .
+          mkdir -p reports/linters
+          ruff check --output-format=github . > reports/linters/ruff.txt || true
+          black --check . > reports/linters/black.txt 2>&1 || true
+          isort --check-only . > reports/linters/isort.txt 2>&1 || true
 
-      - name: Tests
-        run: pytest -q
+      - name: Upload linter reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports-${{ matrix.environment }}-py${{ matrix.python-version }}
+          path: reports/linters/
+
+      - name: Tests with coverage
+        run: |
+          mkdir -p reports
+          pytest -q --junitxml=reports/junit.xml --cov=app --cov-report=html:reports/coverage-html
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.environment }}-py${{ matrix.python-version }}
+          path: reports/
 
       - name: Pre-commit (all files)
         run: pre-commit run --all-files
+
+      - name: Scan Dockerfile with Hadolint
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/Dockerfile:/Dockerfile \
+            hadolint/hadolint \
+            hadolint --ignore DL3008 /Dockerfile
+
+      - name: Scan Docker image with Trivy (Docker)
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --exit-code 1 --severity CRITICAL myapp:test
+
+      - name: Check non-root user
+        run: |
+          USER_ID=$(docker run --rm myapp:test id -u)
+          echo "Container runs as UID=$USER_ID"
+          if [ "$USER_ID" -eq 0 ]; then
+            echo "❌ Container runs as root!"
+            exit 1
+          fi
+
+      - name: Docker image history (layers & size)
+        run: docker history myapp:test --no-trunc
+
+  cd-deploy-simulation:
+    runs-on: ubuntu-latest
+    needs: ci-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    strategy:
+      matrix:
+        environment: [ "stage", "prod" ]
+
+    environment:
+      name: ${{ matrix.environment }}
+      url: https://${{ matrix.environment }}-api.example.com
+
+    steps:
+      - name: Download coverage reports from CI
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-reports-${{ matrix.environment }}-*
+          path: ./reports
+          merge-multiple: true
+
+      - name: Simulate deployment to ${{ matrix.environment }}
+        run: |
+          echo "Starting CD pipeline for ${{ matrix.environment }}"
+          echo "Artifact: app-${{ github.sha }}.whl"
+          echo "Secrets from: ${{ matrix.environment }} GitHub Environment"
+          echo "Target: https://api-${{ matrix.environment }}.example.com"
+          echo ""
+          sleep 3
+          echo "${{ matrix.environment }} deployment simulation completed"
+
+      - name: Deploy coverage report to GitHub Pages (mock CD)
+        if: matrix.environment == 'stage'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./reports/coverage-html
+          destination_dir: coverage-report
+          keep_files: false

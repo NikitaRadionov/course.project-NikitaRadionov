@@ -1,0 +1,68 @@
+title = "Gitleaks Config"
+version = "8.18.0"
+
+[allowlist]
+description = "Allowed patterns and files"
+
+paths = [
+  "**/test_*.py",
+  "**/*_test.py",
+  "**/tests/**",
+  "**/__pycache__/**",
+  "**/.pytest_cache/**",
+  "**/venv/**",
+  "**/.venv/**",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.git/**"
+]
+
+regexes = [
+  "example.*key",
+  "test.*password",
+  "dummy.*secret",
+  "placeholder",
+  "changeme",
+  "your_.*here",
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "sqlite:///.*\\.db"
+]
+
+files = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  ".gitignore",
+  ".dockerignore",
+  "requirements.txt",
+  "requirements-dev.txt",
+  "pyproject.toml"
+]
+
+[[rules]]
+id = "custom-jwt-token"
+description = "Custom JWT token pattern"
+regex = '''eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9._-]*'''
+tags = ["jwt", "token"]
+
+[[rules]]
+id = "custom-api-key"
+description = "Custom API key pattern"
+regex = '''[A-Za-z0-9]{32,64}'''
+tags = ["api-key", "secret"]
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)api[_]?key'''
+entropy = 3.5
+
+[[rules]]
+id = "generic-token"
+description = "Generic Token"
+regex = '''(?i)token'''
+entropy = 3.5

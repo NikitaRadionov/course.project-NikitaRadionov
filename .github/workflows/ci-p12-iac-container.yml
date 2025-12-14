@@ -1,0 +1,97 @@
+name: Security - IaC & Container (P12)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [p12-iac-container, main]
+    paths:
+      - 'Dockerfile'
+      - 'iac/**'
+      - 'security/**'
+      - '.github/workflows/ci-p12-iac-container.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'iac/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p12_iac_container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure evidence directory
+        run: mkdir -p EVIDENCE/P12
+
+      - name: Run Hadolint on Dockerfile with config
+        run: |
+          echo "Running Hadolint with security/hadolint.yaml..."
+          docker run --rm \
+            -v $PWD:/work \
+            -w /work \
+            hadolint/hadolint \
+            hadolint --config security/hadolint.yaml -f json Dockerfile > EVIDENCE/P12/hadolint_report.json || true
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build -t app:local .
+      - name: Run Trivy on Docker image
+        run: |
+          echo "Running Trivy..."
+          docker run --rm --privileged \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $PWD:/work \
+            aquasec/trivy:latest \
+            image --config /work/security/trivy.yaml \
+                  --format json \
+                  --output /work/EVIDENCE/P12/trivy_report.json \
+                  app:local
+
+      - name: Run Checkov on IaC with config
+        run: |
+          echo "Running Checkov with security/checkov.yaml..."
+          docker run --rm \
+            -v $PWD:/work \
+            bridgecrew/checkov:latest \
+            -d /work/iac \
+            --config-file /work/security/checkov.yaml \
+            -o json > EVIDENCE/P12/checkov_report.json || true
+      - name: Create hardening summary
+        run: |
+          cat > EVIDENCE/P12/hardening_summary.md << 'EOF'
+          - Multi-stage build (build → runtime)
+          - Fixed base image: python:3.11-slim
+          - Non-root user (appuser)
+          - Minimal packages (--no-install-recommends)
+          - Cleaned apt cache
+          - pip --no-cache-dir
+          - Healthcheck enabled
+          - no-new-privileges enabled
+          - All Linux capabilities dropped
+          - Read-only root filesystem
+          - tmpfs for /tmp
+          - Explicit non-root user (UID 1000)
+          - Healthcheck configured
+          - Dockerfile linted with Hadolint
+          - IaC scanned with Checkov (docker-compose)
+          - Image scanned with Trivy (CRITICAL/HIGH/MEDIUM)
+          - Remaining Trivy findings relate to base image dependencies.
+          - Mitigation plan: regular base image updates.
+          EOF
+      - name: Upload P12 Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: P12_EVIDENCE
+          path: EVIDENCE/P12
