@@ -1,5 +1,7 @@
 quiet: true
-framework: docker_compose
+framework:
+  - dockerfile
+  - yaml
 skip-check:
   - CKV_DOCKER_2
   - CKV_DOCKER_3
