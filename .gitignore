@@ -1,3 +1,9 @@
+# Database
+db/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
 # Python
 __pycache__/
 *.py[cod]
