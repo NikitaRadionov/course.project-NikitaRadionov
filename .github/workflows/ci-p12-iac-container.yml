@@ -34,12 +34,6 @@ jobs:
       - name: Ensure evidence directory
         run: mkdir -p EVIDENCE/P12
 
-      - name: Debug files
-        run: |
-          ls -l
-          ls -l security
-          cat Dockerfile
-
       - name: Run Hadolint on Dockerfile with config
         run: |
           echo "Running Hadolint with security/hadolint.yaml..."
@@ -58,7 +52,10 @@ jobs:
           docker run --rm \
             -v $PWD:/work \
             aquasec/trivy:latest \
-            image --format json --output /work/EVIDENCE/P12/trivy_report.json app:local || true
+            image \
+            --config /work/security/trivy.yaml \
+            --output /work/EVIDENCE/P12/trivy_report.json \
+            app:local
       - name: Run Checkov on IaC with config
         run: |
           echo "Running Checkov with security/checkov.yaml..."
