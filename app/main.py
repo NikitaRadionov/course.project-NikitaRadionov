@@ -1,151 +1,40 @@
-import uuid
+import os
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from typing import List, Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
-from pydantic import BaseModel
 from sqlalchemy import and_
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Session, select
 
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+from .database import create_db_and_tables, get_session
+from .exceptions import ApiError, setup_exception_handlers
+from .models import KindEnum, Media, StatusEnum, Token, User
+from .schemas import MediaCreate, MediaRead, UserBase, UserCreate
 
+load_dotenv()
 
-class KindEnum(str, Enum):
-    movie = "movie"
-    course = "course"
+if not os.getenv("SECRET_KEY"):
+    raise RuntimeError("Missing SECRET_KEY in environment")
 
-
-class StatusEnum(str, Enum):
-    planned = "planned"
-    watching = "watching"
-    done = "done"
-
-
-DATABASE_URL = "sqlite:///./media.db"
-engine = create_engine(
-    DATABASE_URL, echo=True, connect_args={"check_same_thread": False}
-)
-
-
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-
-
-def get_session():
-    with Session(engine) as session:
-        yield session
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
 
 
 password_hash = PasswordHash.recommended()
 
-
-class UserBase(SQLModel):
-    username: str = Field(index=True, unique=True)
-
-
-class User(UserBase, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    hashed_password: str
-
-
-class UserCreate(UserBase):
-    password: str
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-
-class MediaBase(SQLModel):
-    title: str
-    kind: KindEnum
-    year: int = Field(ge=1888, description="Year of production, not earlier than 1888")
-    status: StatusEnum
-
-
-class Media(MediaBase, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    owner_id: int = Field(foreign_key="user.id")
-    one_liner: Optional[str] = None
-
-
-class MediaCreate(MediaBase):
-    pass
-
-
-class MediaRead(MediaBase):
-    id: int
-    owner_id: int
-    one_liner: Optional[str] = None
-
-
 app = FastAPI(title="Media Catalog", version="0.1.0")
+
+setup_exception_handlers(app)
 
 
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
-
-
-class ApiError(Exception):
-    def __init__(self, code: str, message: str, status: int = 400):
-        self.code = code
-        self.message = message
-        self.status = status
-
-
-@app.exception_handler(ApiError)
-async def api_error_handler(request: Request, exc: ApiError):
-    correlation_id = str(uuid.uuid4())
-    return JSONResponse(
-        status_code=exc.status,
-        content={
-            "type": "about:blank",
-            "title": exc.code,
-            "status": exc.status,
-            "detail": exc.message,
-            "correlation_id": correlation_id,
-        },
-    )
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    correlation_id = str(uuid.uuid4())
-    detail = exc.detail if isinstance(exc.detail, str) else "http_error"
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "type": "about:blank",
-            "title": "http_error",
-            "status": exc.status_code,
-            "detail": detail,
-            "correlation_id": correlation_id,
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def internal_error_handler(request: Request, exc: Exception):
-    correlation_id = str(uuid.uuid4())
-    return JSONResponse(
-        status_code=500,
-        content={
-            "type": "about:blank",
-            "title": "internal_error",
-            "status": 500,
-            "detail": "internal_error",
-            "correlation_id": correlation_id,
-        },
-    )
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -173,13 +62,19 @@ def get_current_user(
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if not username:
-            raise HTTPException(status_code=401, detail="Invalid authentication")
+            raise ApiError(
+                status=401, title="Unauthorized", detail="Invalid authentication"
+            )
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication")
+        raise ApiError(
+            status=401, title="Unauthorized", detail="Invalid authentication"
+        )
 
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid authentication")
+        raise ApiError(
+            status=401, title="Unauthorized", detail="Invalid authentication"
+        )
     return user
 
 
@@ -187,7 +82,7 @@ def get_current_user(
 def create_user(user: UserCreate, session: Session = Depends(get_session)):
     db_user = session.exec(select(User).where(User.username == user.username)).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Username already exists")
+        raise ApiError(status=400, title="Conflict", detail="Username already exists")
     hashed_password = get_password_hash(user.password)
     new_user = User(username=user.username, hashed_password=hashed_password)
     session.add(new_user)
@@ -203,7 +98,11 @@ def login(
 ):
     user = session.exec(select(User).where(User.username == form_data.username)).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect username or password")
+        raise ApiError(
+            status=400,
+            title="Invalid Credentials",
+            detail="Incorrect username or password",
+        )
     access_token = create_access_token(
         {"sub": user.username}, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
@@ -217,7 +116,7 @@ def create_media(
     current_user: User = Depends(get_current_user),
 ):
     new_media = Media(
-        **media.dict(),
+        **media.model_dump(),
         owner_id=current_user.id,
         one_liner=f"Metadata for {media.title}",
     )
@@ -252,7 +151,7 @@ def get_media(
 ):
     media = session.get(Media, media_id)
     if not media or media.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Media not found")
+        raise ApiError(status=404, title="Not Found", detail="Media not found")
     return media
 
 
@@ -265,9 +164,9 @@ def update_media(
 ):
     media = session.get(Media, media_id)
     if not media or media.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Media not found")
+        raise ApiError(status=404, title="Not Found", detail="Media not found")
 
-    update_fields = new_data.dict(exclude_unset=True)
+    update_fields = new_data.model_dump(exclude_unset=True)
     for field, value in update_fields.items():
         setattr(media, field, value)
 
@@ -285,7 +184,22 @@ def delete_media(
 ):
     media = session.get(Media, media_id)
     if not media or media.owner_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Media not found")
+        raise ApiError(status=404, title="Not Found", detail="Media not found")
     session.delete(media)
     session.commit()
     return {"ok": True}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/")
+def read_root():
+    return {
+        "service": "Media Catalog API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
