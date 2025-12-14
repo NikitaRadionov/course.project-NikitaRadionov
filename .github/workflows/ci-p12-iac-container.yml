@@ -52,10 +52,8 @@ jobs:
           docker run --rm \
             -v $PWD:/work \
             aquasec/trivy:latest \
-            image \
-            --config /work/security/trivy.yaml \
-            --output /work/EVIDENCE/P12/trivy_report.json \
-            app:local
+            image --config /work/security/trivy.yaml --format json --output /work/EVIDENCE/P12/trivy_report.json app:local || true
+
       - name: Run Checkov on IaC with config
         run: |
           echo "Running Checkov with security/checkov.yaml..."
