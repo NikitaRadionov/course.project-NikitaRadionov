@@ -1,8 +1,5 @@
 quiet: true
-framework:
-  - dockerfile
-  - yaml
-skip-check:
-  - CKV_DOCKER_2
-  - CKV_DOCKER_3
-output: json
+soft-fail: true
+compact: true
+framework: all
+skip-check: []
