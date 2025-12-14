@@ -42,12 +42,10 @@ jobs:
             -w /work \
             hadolint/hadolint \
             hadolint --config security/hadolint.yaml -f json Dockerfile > EVIDENCE/P12/hadolint_report.json || true
-
       - name: Build Docker image
         run: |
           echo "Building Docker image..."
           docker build -t app:local .
-
       - name: Run Trivy on Docker image
         run: |
           echo "Running Trivy..."
@@ -55,7 +53,6 @@ jobs:
             -v $PWD:/work \
             aquasec/trivy:latest \
             image --format json --output /work/EVIDENCE/P12/trivy_report.json app:local || true
-
       - name: Run Checkov on IaC with config
         run: |
           echo "Running Checkov with security/checkov.yaml..."
@@ -65,11 +62,9 @@ jobs:
             -d /work/iac \
             --config-file /work/security/checkov.yaml \
             -o json > EVIDENCE/P12/checkov_report.json || true
-
       - name: Create hardening summary
         run: |
           cat > EVIDENCE/P12/hardening_summary.md << 'EOF'
-
           - Multi-stage build (build → runtime)
           - Fixed base image: python:3.11-slim
           - Non-root user (appuser)
@@ -77,22 +72,18 @@ jobs:
           - Cleaned apt cache
           - pip --no-cache-dir
           - Healthcheck enabled
-
           - no-new-privileges enabled
           - All Linux capabilities dropped
           - Read-only root filesystem
           - tmpfs for /tmp
           - Explicit non-root user (UID 1000)
           - Healthcheck configured
-
           - Dockerfile linted with Hadolint
           - IaC scanned with Checkov (docker-compose)
           - Image scanned with Trivy (CRITICAL/HIGH/MEDIUM)
-
           - Remaining Trivy findings relate to base image dependencies.
           - Mitigation plan: regular base image updates.
           EOF
-
       - name: Upload P12 Evidence
         if: always()
         uses: actions/upload-artifact@v4
