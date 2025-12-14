@@ -49,10 +49,14 @@ jobs:
       - name: Run Trivy on Docker image
         run: |
           echo "Running Trivy..."
-          docker run --rm \
+          docker run --rm --privileged \
+            -v /var/run/docker.sock:/var/run/docker.sock \
             -v $PWD:/work \
             aquasec/trivy:latest \
-            image --config /work/security/trivy.yaml --format json --output /work/EVIDENCE/P12/trivy_report.json app:local || true
+            image --config /work/security/trivy.yaml \
+                  --format json \
+                  --output /work/EVIDENCE/P12/trivy_report.json \
+                  app:local
 
       - name: Run Checkov on IaC with config
         run: |
